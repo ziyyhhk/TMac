@@ -9,8 +9,12 @@
 // Known gaps: no name entry, and load cycles through saved macros in order.
 // =============================================================================
 #include <Geode/Geode.hpp>
+#include <Geode/binding/ButtonSprite.hpp>
+#include <Geode/binding/CCMenuItemSpriteExtra.hpp>
+#include <Geode/loader/SettingV3.hpp>
 #include <Geode/modify/PauseLayer.hpp>
 #include <Geode/modify/PlayLayer.hpp>
+#include <Geode/ui/Popup.hpp>
 
 #include <map>
 #include <string>
@@ -30,7 +34,7 @@ class TMacPanel : public geode::Popup<> {
 public:
     static TMacPanel* create();
     static void open();
-    void onClose(CCObject* sender);  // also called by the close button, so state stays in sync
+    void onClose() override;  // Popup::onClose takes no arguments; keeps state in sync with the close button
 
     void onRecord(CCObject*);
     void onStopRecording(CCObject*);
@@ -75,10 +79,10 @@ void TMacPanel::open() {
     }
 }
 
-void TMacPanel::onClose(CCObject* sender) {
+void TMacPanel::onClose() {
     if (g_panel == this) g_panel = nullptr;
     tmacRuntime().toggle.setOpen(false);
-    geode::Popup<>::onClose(sender);  // UNVERIFIED: Popup::onClose is assumed to be the close handler
+    geode::Popup<>::onClose();
 }
 
 void tmacOnToggleKey(bool down, bool repeat) {
@@ -94,7 +98,7 @@ void tmacOnToggleKey(bool down, bool repeat) {
             rt.toggle.setOpen(g_panel != nullptr);
             break;
         case tmac::ToggleController::Action::Close:
-            if (g_panel) g_panel->onClose(nullptr);
+            if (g_panel) g_panel->onClose();
             rt.toggle.setOpen(false);
             break;
         case tmac::ToggleController::Action::None:
@@ -103,13 +107,13 @@ void tmacOnToggleKey(bool down, bool repeat) {
 }
 
 void tmacCloseOpenPanel() {
-    if (g_panel) g_panel->onClose(nullptr);
+    if (g_panel) g_panel->onClose();
 }
 
 // TAB is registered as a keybind setting in mod.json ("toggle-key").
 // UNVERIFIED: the keybind default JSON shape; the Geode VS Code extension validates mod.json.
 $on_mod(Loaded) {
-    [[maybe_unused]] static auto* toggleListener = listenForKeybindSettingPresses(
+    [[maybe_unused]] static auto* toggleListener = geode::listenForKeybindSettingPresses(
         "toggle-key",
         [](auto const&, bool down, bool repeat, double) -> bool {
             tmacOnToggleKey(down, repeat);

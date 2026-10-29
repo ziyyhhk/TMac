@@ -58,6 +58,9 @@ if(DEFINED ENV{GEODE_SDK})
         src/geode/TMacMod.cpp
         src/geode/TMacPanel.cpp
     )
-    target_link_libraries(${PROJECT_NAME} PRIVATE tmac_core)
+    # Plain signature on purpose. CMake forbids mixing the keyword form (PRIVATE/PUBLIC)
+    # with the plain form on the same target, and setup_geode_mod() uses the plain form
+    # on ${PROJECT_NAME}. Mixing them fails configuration.
+    target_link_libraries(${PROJECT_NAME} tmac_core)
     setup_geode_mod(${PROJECT_NAME})
 endif()
