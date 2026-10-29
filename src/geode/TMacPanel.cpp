@@ -34,6 +34,7 @@
 #include <algorithm>
 #include <map>
 #include <string>
+#include <vector>
 
 #include "TMacPanel.hpp"
 #include "TMacRuntime.hpp"
@@ -185,19 +186,22 @@ void tmacCloseOpenPanel() {
 // Geode's own keybind dispatch (LoaderImpl) maps a press to
 // KeyboardInputData::Action::Press, so `down` below means "not a release".
 $on_mod(Loaded) {
-    [[maybe_unused]] static auto* toggleListener = geode::KeyboardInputEvent().listen(
+    [[maybe_unused]] static auto toggleListener = geode::KeyboardInputEvent().listen(
         [](geode::KeyboardInputData& data) -> geode::ListenerResult {
             const bool down = data.action != geode::KeyboardInputData::Action::Release;
             const bool repeat = data.action == geode::KeyboardInputData::Action::Repeat;
 
             cocos2d::enumKeyCodes expected = cocos2d::KEY_Tab;
             try {
-                // Absent or unparsable settings report false here or throw;
-                // either way the Tab default stands.
+                // A keybind setting's value type is std::vector<Keybind>, one
+                // entry per bound key. An absent or unparsable setting reports
+                // false here or throws; either way the Tab default stands.
                 if (geode::Mod::get()->hasSetting("toggle-key")) {
-                    const geode::Keybind bind =
-                        geode::Mod::get()->getSettingValue<geode::Keybind>("toggle-key");
-                    if (bind.key != cocos2d::KEY_None) expected = bind.key;
+                    const std::vector<geode::Keybind> binds =
+                        geode::Mod::get()->getSettingValue<std::vector<geode::Keybind>>("toggle-key");
+                    if (!binds.empty() && binds.front().key != cocos2d::KEY_None) {
+                        expected = binds.front().key;
+                    }
                 }
             } catch (...) {
                 // Keep the Tab default.
