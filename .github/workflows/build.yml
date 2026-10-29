@@ -1,0 +1,57 @@
+name: Build TMac
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  core-tests:
+    name: Core unit tests (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S . -B build -DTMAC_BUILD_TESTS=ON
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Run tests
+        run: ctest --test-dir build --output-on-failure
+
+  geode-build:
+    name: Geode mod build (Windows, GD 2.2081 / Geode 5.11.1)
+    runs-on: windows-latest
+    needs: core-tests
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      # UNVERIFIED: confirm this action exists and its inputs against the Geode
+      # documentation before relying on it. The job must fail clearly if the
+      # build does not produce a package, which the steps below enforce.
+      - name: Build Geode mod
+        uses: geode-sdk/build-geode-mod@main
+
+      - name: Verify compiled output exists
+        shell: pwsh
+        run: |
+          $packages = Get-ChildItem -Recurse -Filter *.geode -Path . -ErrorAction SilentlyContinue
+          if (-not $packages) {
+            Write-Error "No .geode package was produced. The build failed or the output path changed."
+            exit 1
+          }
+          $packages | ForEach-Object { Write-Output $_.FullName }
+
+      - name: Upload compiled mod
+        uses: actions/upload-artifact@v4
+        with:
+          name: TMac-GeometryDash-2.2081-Geode-5.11.1
+          path: "**/*.geode"
+          if-no-files-found: error

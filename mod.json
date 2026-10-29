@@ -1,0 +1,12 @@
+{
+  "geode": "5.11.1",
+  "gd": {
+    "win": "2.2081"
+  },
+  "id": "tmac.macro",
+  "name": "TMac",
+  "version": "1.1.0",
+  "developer": "TMac contributors",
+  "description": "Record, save, load and replay Geometry Dash macros in the .gdr2 format.",
+  "tags": ["gameplay", "utility"]
+}
