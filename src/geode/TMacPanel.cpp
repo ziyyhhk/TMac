@@ -11,17 +11,16 @@
 //     touch and keypad input, then removes the popup from its parent. The
 //     built-in X button and keyBackClicked() (ESC) both go through it, so
 //     overriding it is the only way to catch every close.
-//   * Popup::init *does* create m_mainLayer (content size = popup size,
-//     centred on screen) and m_buttonMenu (z-order 100, kept the same size as
-//     m_mainLayer by CopySizeLayout). Content belongs in those nodes, with
-//     coordinates relative to the window box, not in screen coordinates on the
-//     popup itself.
+//   * Popup::init creates m_mainLayer (content size = popup size, centred on
+//     screen) and m_buttonMenu (z-order 100, kept the same size as m_mainLayer
+//     by CopySizeLayout). Content belongs in those nodes, with coordinates
+//     relative to the window box, not in screen coordinates.
 //   * Buttons go in m_buttonMenu so they inherit the popup's forced touch
 //     priority; a hand-made CCMenu added to the popup is not guaranteed to
 //     receive touches while the popup is swallowing them.
 //
-// Still unverified: exact pixel placement inside the window and the pause-menu
-// button position have not been checked in-game.
+// Still unverified: exact pixel placement has not been checked in-game, and
+// the pause-menu button position is a guess.
 // =============================================================================
 #include <Geode/Geode.hpp>
 #include <Geode/binding/ButtonSprite.hpp>
@@ -30,7 +29,9 @@
 #include <Geode/modify/PauseLayer.hpp>
 #include <Geode/modify/PlayLayer.hpp>
 #include <Geode/ui/Popup.hpp>
+#include <Geode/utils/Keyboard.hpp>
 
+#include <algorithm>
 #include <map>
 #include <string>
 
@@ -50,6 +51,8 @@ TMacPanel* g_panel = nullptr;
 
 constexpr float kPanelWidth = 380.f;
 constexpr float kPanelHeight = 340.f;
+constexpr float kBarWidth = 300.f;
+constexpr float kBarHeight = 8.f;
 
 }  // namespace
 
@@ -86,7 +89,9 @@ protected:
     std::map<std::string, CCMenuItemSpriteExtra*> m_buttons;
     CCLabelBMFont* m_status = nullptr;
     CCLabelBMFont* m_timer = nullptr;
+    CCLabelBMFont* m_counts = nullptr;
     CCLabelBMFont* m_info = nullptr;
+    CCLayerColor* m_barFill = nullptr;
     bool m_saved = false;  // whether the current macro has been written to disk
 };
 
@@ -168,56 +173,102 @@ void tmacCloseOpenPanel() {
     tmacRuntime().toggle.setOpen(false);
 }
 
-// TAB is registered as a keybind setting in mod.json ("toggle-key").
-// UNVERIFIED: the keybind default JSON shape; the Geode VS Code extension validates mod.json.
+// TAB toggles the window.
+//
+// This listens to the keyboard directly rather than to the "toggle-key"
+// keybind setting, because the keybind path has two ways to fail silently: a
+// keybind default that Geode cannot parse leaves the setting unregistered, and
+// an older settings file on disk can keep pointing at a setting that no longer
+// exists ("Missing setting"). Neither leaves the mod broken here: the setting
+// is still honoured when it is readable, and Tab always works.
+//
+// Geode's own keybind dispatch (LoaderImpl) maps a press to
+// KeyboardInputData::Action::Press, so `down` below means "not a release".
 $on_mod(Loaded) {
-    [[maybe_unused]] static auto* toggleListener = geode::listenForKeybindSettingPresses(
-        "toggle-key",
-        [](auto const&, bool down, bool repeat, double) -> bool {
-            tmacOnToggleKey(down, repeat);
-            return true;
-        },
-        geode::Mod::get());
+    [[maybe_unused]] static auto* toggleListener = geode::KeyboardInputEvent().listen(
+        [](geode::KeyboardInputData& data) -> geode::ListenerResult {
+            const bool down = data.action != geode::KeyboardInputData::Action::Release;
+            const bool repeat = data.action == geode::KeyboardInputData::Action::Repeat;
+
+            cocos2d::enumKeyCodes expected = cocos2d::KEY_Tab;
+            try {
+                // Absent or unparsable settings report false here or throw;
+                // either way the Tab default stands.
+                if (geode::Mod::get()->hasSetting("toggle-key")) {
+                    const geode::Keybind bind =
+                        geode::Mod::get()->getSettingValue<geode::Keybind>("toggle-key");
+                    if (bind.key != cocos2d::KEY_None) expected = bind.key;
+                }
+            } catch (...) {
+                // Keep the Tab default.
+            }
+
+            if (data.key == expected && data.modifiers == geode::KeyboardModifier::None) {
+                tmacOnToggleKey(down, repeat);
+            }
+            return geode::ListenerResult::Propagate;
+        });
 }
 
 bool TMacPanel::setupPanel() {
     if (!geode::Popup::init(kPanelWidth, kPanelHeight)) return false;
     setTitle("TMac");
 
-    // Offsets below are relative to the window box (m_mainLayer), so the
-    // layout no longer depends on the screen resolution.
+    // Offsets are relative to the window box (m_mainLayer), so the layout does
+    // not depend on the screen resolution.
     m_status = CCLabelBMFont::create("Idle", "bigFont.fnt");
-    m_status->setScale(.6f);
-    m_mainLayer->addChildAtPosition(m_status, geode::Anchor::Top, ccp(0.f, -52.f));
+    m_status->setScale(.55f);
+    m_mainLayer->addChildAtPosition(m_status, geode::Anchor::Top, ccp(0.f, -50.f));
 
     m_timer = CCLabelBMFont::create("", "chatFont.fnt");
     m_timer->setScale(.7f);
-    m_mainLayer->addChildAtPosition(m_timer, geode::Anchor::Top, ccp(0.f, -78.f));
+    m_mainLayer->addChildAtPosition(m_timer, geode::Anchor::Top, ccp(0.f, -74.f));
+
+    // Playback progress. The track is a plain dark bar; the fill is a child of
+    // it anchored on the left edge, so only its width has to change.
+    auto* track = CCLayerColor::create(ccc4(0, 0, 0, 110), kBarWidth, kBarHeight);
+    track->ignoreAnchorPointForPosition(false);
+    track->setAnchorPoint(ccp(.5f, .5f));
+    m_mainLayer->addChildAtPosition(track, geode::Anchor::Top, ccp(0.f, -92.f));
+
+    m_barFill = CCLayerColor::create(ccc4(95, 215, 130, 255), 0.f, kBarHeight);
+    m_barFill->ignoreAnchorPointForPosition(false);
+    m_barFill->setAnchorPoint(ccp(0.f, .5f));
+    m_barFill->setPosition(ccp(0.f, kBarHeight / 2.f));
+    track->addChild(m_barFill);
+
+    m_counts = CCLabelBMFont::create("", "chatFont.fnt");
+    m_counts->setScale(.5f);
+    m_counts->setColor(ccc3(170, 170, 170));
+    m_mainLayer->addChildAtPosition(m_counts, geode::Anchor::Top, ccp(0.f, -108.f));
 
     m_info = CCLabelBMFont::create("", "chatFont.fnt");
     m_info->setScale(.6f);
-    m_mainLayer->addChildAtPosition(m_info, geode::Anchor::Bottom, ccp(0.f, 20.f));
+    m_mainLayer->addChildAtPosition(m_info, geode::Anchor::Bottom, ccp(0.f, 16.f));
 
     const float colX[2] = {-85.f, 85.f};
-    const float rowY[4] = {45.f, 5.f, -35.f, -75.f};
+    const float rowY[4] = {26.f, -12.f, -50.f, -88.f};
     addButton("record", "Record", menu_selector(TMacPanel::onRecord), colX[0], rowY[0]);
     addButton("stopRecord", "Stop Rec", menu_selector(TMacPanel::onStopRecording), colX[1], rowY[0]);
     addButton("play", "Play", menu_selector(TMacPanel::onPlay), colX[0], rowY[1]);
-    addButton("restart", "Restart", menu_selector(TMacPanel::onRestart), colX[1], rowY[1]);
-    addButton("pause", "Pause", menu_selector(TMacPanel::onPause), colX[0], rowY[2]);
-    addButton("resume", "Resume", menu_selector(TMacPanel::onResume), colX[1], rowY[2]);
-    addButton("stop", "Stop", menu_selector(TMacPanel::onStop), colX[0], rowY[3]);
+    addButton("pause", "Pause", menu_selector(TMacPanel::onPause), colX[1], rowY[1]);
+    addButton("resume", "Resume", menu_selector(TMacPanel::onResume), colX[0], rowY[2]);
+    addButton("stop", "Stop", menu_selector(TMacPanel::onStop), colX[1], rowY[2]);
+    addButton("restart", "Restart", menu_selector(TMacPanel::onRestart), colX[0], rowY[3]);
     addButton("save", "Save", menu_selector(TMacPanel::onSave), colX[1], rowY[3]);
-    addButton("load", "Load", menu_selector(TMacPanel::onLoad), 0.f, -115.f);
+    addButton("load", "Load", menu_selector(TMacPanel::onLoad), 0.f, -126.f);
 
-    schedule(schedule_selector(TMacPanel::tick), 0.1f);
+    schedule(schedule_selector(TMacPanel::tick), 0.05f);
     refresh();
     return true;
 }
 
 void TMacPanel::addButton(const std::string& id, const char* label, SEL_MenuHandler handler,
                           float x, float y) {
-    auto* button = CCMenuItemSpriteExtra::create(ButtonSprite::create(label), this, handler);
+    auto* sprite = ButtonSprite::create(label);
+    sprite->setCascadeOpacityEnabled(true);
+    auto* button = CCMenuItemSpriteExtra::create(sprite, this, handler);
+    button->setCascadeOpacityEnabled(true);
     // m_buttonMenu already carries the popup's touch priority.
     m_buttonMenu->addChildAtPosition(button, geode::Anchor::Center, ccp(x, y));
     m_buttons[id] = button;
@@ -225,7 +276,10 @@ void TMacPanel::addButton(const std::string& id, const char* label, SEL_MenuHand
 
 void TMacPanel::setButtonEnabled(const std::string& id, bool enabled) {
     auto it = m_buttons.find(id);
-    if (it != m_buttons.end()) it->second->setEnabled(enabled);
+    if (it == m_buttons.end()) return;
+    it->second->setEnabled(enabled);
+    // setEnabled alone leaves the sprite looking clickable, so dim it too.
+    it->second->setOpacity(enabled ? 255 : 90);
 }
 
 void TMacPanel::tick(float) {
@@ -234,11 +288,27 @@ void TMacPanel::tick(float) {
 
 void TMacPanel::refresh() {
     TMacRuntime& rt = tmacRuntime();
-    const tmac::PanelView v = tmac::buildPanelView(rt.session, rt.clock.frame(), m_saved);
+    const tmac::PanelView v = tmac::buildPanelView(rt.session, tmacCurrentFrame(), m_saved);
 
     m_status->setString(v.status.c_str());
+    if (v.recordingActive) {
+        m_status->setColor(ccc3(255, 95, 95));
+    } else if (v.paused) {
+        m_status->setColor(ccc3(255, 215, 110));
+    } else if (v.playbackActive) {
+        m_status->setColor(ccc3(110, 230, 145));
+    } else {
+        m_status->setColor(ccc3(255, 255, 255));
+    }
+
     m_timer->setString((v.elapsed + " / " + v.duration).c_str());
     m_info->setString(v.statusDetail.c_str());
+    std::string counts = std::to_string(v.eventCount) + " inputs";
+    if (v.eventCount > 0 && !m_saved) counts += " - unsaved";
+    m_counts->setString(counts.c_str());
+
+    const double clamped = std::clamp(v.progress, 0.0, 1.0);
+    m_barFill->setContentSize(CCSize{static_cast<float>(kBarWidth * clamped), kBarHeight});
 
     setButtonEnabled("record", v.canRecord);
     setButtonEnabled("stopRecord", v.canStopRecording);
@@ -253,13 +323,13 @@ void TMacPanel::refresh() {
 
 void TMacPanel::onRecord(CCObject*) {
     TMacRuntime& rt = tmacRuntime();
-    if (rt.session.startRecording(rt.clock.frame(), tmac::MacroMeta{})) m_saved = false;
+    if (rt.session.startRecording(tmacCurrentFrame(), tmac::MacroMeta{})) m_saved = false;
     refresh();
 }
 
 void TMacPanel::onStopRecording(CCObject*) {
     TMacRuntime& rt = tmacRuntime();
-    if (rt.session.stopRecording(rt.clock.frame())) m_saved = false;
+    if (rt.session.stopRecording(tmacCurrentFrame())) m_saved = false;
     refresh();
 }
 
@@ -339,7 +409,7 @@ class $modify(TMacPauseLayer, PauseLayer) {
     void customSetup() {
         PauseLayer::customSetup();
         TMacRuntime& rt = tmacRuntime();
-        dispatchToGame(rt.session.onLevelEvent(tmac::LevelEvent::GamePaused, rt.clock.frame()));
+        dispatchToGame(rt.session.onLevelEvent(tmac::LevelEvent::GamePaused, tmacCurrentFrame()));
 
         CCMenu* menu = CCMenu::create();
         auto* button = CCMenuItemSpriteExtra::create(ButtonSprite::create("TMac"), this,
@@ -353,7 +423,7 @@ class $modify(TMacPauseLayer, PauseLayer) {
 
     void onResume(CCObject* sender) {
         TMacRuntime& rt = tmacRuntime();
-        dispatchToGame(rt.session.onLevelEvent(tmac::LevelEvent::GameResumed, rt.clock.frame()));
+        dispatchToGame(rt.session.onLevelEvent(tmac::LevelEvent::GameResumed, tmacCurrentFrame()));
         PauseLayer::onResume(sender);
     }
 

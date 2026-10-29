@@ -1,4 +1,3 @@
-// UNVERIFIED Geode integration. See TMacMod.cpp for the scope of this warning.
 #include "TMacRuntime.hpp"
 
 #include <Geode/Geode.hpp>
@@ -14,10 +13,17 @@ TMacRuntime& tmacRuntime() {
 tmac::MacroStore* tmacStore() {
     TMacRuntime& rt = tmacRuntime();
     if (!rt.store) {
-        // UNVERIFIED: Mod::getSaveDir() is assumed to be the per-mod save folder.
         rt.store = std::make_unique<tmac::MacroStore>(geode::Mod::get()->getSaveDir() / "macros");
     }
     return rt.store.get();
+}
+
+uint64_t tmacCurrentFrame() {
+    PlayLayer* level = PlayLayer::get();
+    if (!level) return 0;
+    // m_currentProgress counts half physics steps; the macro is indexed in
+    // whole 240 Hz steps, which is the convention the 2.2 bots use.
+    return static_cast<uint64_t>(level->m_gameState.m_currentProgress / 2);
 }
 
 void dispatchToGame(const std::vector<tmac::InputEvent>& events) {
@@ -26,15 +32,16 @@ void dispatchToGame(const std::vector<tmac::InputEvent>& events) {
     if (!level || !level->m_player1) return;
 
     TMacRuntime& rt = tmacRuntime();
+    const bool dual = level->m_gameState.m_isDualMode;
     rt.dispatching = true;
     for (const tmac::InputEvent& event : events) {
-        if (event.player2) continue;
-        const auto button = static_cast<PlayerButton>(static_cast<int>(event.button));
-        if (event.down) {
-            level->m_player1->pushButton(button);
-        } else {
-            level->m_player1->releaseButton(button);
-        }
+        // A single-player run cannot drive player 2; drop those events rather
+        // than pretending they were applied.
+        if (event.player2 && !dual) continue;
+        const int button = static_cast<int>(event.button);
+        // Qualified call: dispatch exactly what the game does, regardless of any
+        // other mod that also hooks handleButton.
+        level->GJBaseGameLayer::handleButton(event.down, button, !event.player2);
     }
     rt.dispatching = false;
 }

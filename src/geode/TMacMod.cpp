@@ -1,16 +1,31 @@
 // =============================================================================
-// GEODE HOOKS: NOT COMPILED OR RUN IN THIS ENVIRONMENT.
-// Hook targets and member names come from memory of the Geode and Geometry Dash
-// 2.2081 APIs. Check each against the Geode v5.11.1 headers before relying on it.
-// Known scope limits:
-//   * Player 1 only.
-//   * Clock is driven by PlayLayer::update deltas through FixedStepClock.
-//     Geometry Dash's own physics still uses the raw deltas, so in-game timing
-//     accuracy is NOT verified.
+// GEODE HOOKS.
+//
+// The macro frame number is Geometry Dash's own physics step counter
+// (m_gameState.m_currentProgress / 2) rather than a clock built from real-time
+// deltas. This is what frame-accurate Geode 2.2 bots index macros by: GD runs
+// 240 physics steps per second, m_currentProgress counts half-steps, and it is
+// identical for a recording and a replay at the same moment. A clock that
+// integrates dt drifts away from the physics it is supposed to describe.
+//
+// Input capture and injection both go through GJBaseGameLayer::handleButton,
+// the function GD itself calls for every press and release, whatever the
+// device. PlayerObject::pushButton is only the inner half of that and misses
+// bookkeeping the layer does.
+//
+// Injection happens at the start of each physics step, in
+// processQueuedButtons, instead of once per rendered frame. At 60 fps and 240
+// physics steps, once-per-frame injection can only place an input 4 steps
+// late; per step it lands on the exact step the macro recorded.
+//
+// Scope limits that remain:
+//   * No TPS bypass / frame stepper, so playback is step-accurate but depends
+//     on the same physics delta the recording ran with.
+//   * The pause-menu button placement is still unverified visually.
 // =============================================================================
 #include <Geode/Geode.hpp>
+#include <Geode/modify/GJBaseGameLayer.hpp>
 #include <Geode/modify/PlayLayer.hpp>
-#include <Geode/modify/PlayerObject.hpp>
 
 #include "TMacPanel.hpp"
 #include "TMacRuntime.hpp"
@@ -21,29 +36,12 @@ namespace {
 
 void notifyLevel(tmac::LevelEvent event) {
     TMacRuntime& rt = tmacRuntime();
-    dispatchToGame(rt.session.onLevelEvent(event, rt.clock.frame()));
-}
-
-// Records a button transition made by the player. TMac's own dispatches are
-// excluded, so playback never records itself.
-void noteTransition(PlayerObject* player, PlayerButton button, bool down) {
-    TMacRuntime& rt = tmacRuntime();
-    if (rt.dispatching || !rt.session.isRecording()) return;
-    PlayLayer* level = PlayLayer::get();
-    if (!level || player != level->m_player1) return;
-    rt.session.recordButton(rt.clock.frame(), false, static_cast<tmac::Button>(static_cast<int>(button)), down);
+    dispatchToGame(rt.session.onLevelEvent(event, tmacCurrentFrame()));
 }
 
 }  // namespace
 
 class $modify(TMacPlayLayer, PlayLayer) {
-    void update(float dt) {
-        PlayLayer::update(dt);
-        TMacRuntime& rt = tmacRuntime();
-        const uint64_t frame = rt.clock.advance(dt);
-        dispatchToGame(rt.session.tick(frame));
-    }
-
     void destroyPlayer(PlayerObject* player, GameObject* object) {
         if (player == m_player1) notifyLevel(tmac::LevelEvent::Died);
         PlayLayer::destroyPlayer(player, object);
@@ -62,19 +60,30 @@ class $modify(TMacPlayLayer, PlayLayer) {
     void onQuit() {
         notifyLevel(tmac::LevelEvent::Exited);
         tmacCloseOpenPanel();
-        tmacRuntime().clock.reset();
         PlayLayer::onQuit();
     }
 };
 
-class $modify(TMacPlayerObject, PlayerObject) {
-    bool pushButton(PlayerButton button) {
-        noteTransition(this, button, true);
-        return PlayerObject::pushButton(button);
+class $modify(TMacBaseGameLayer, GJBaseGameLayer) {
+    // Every real press and release in the layer passes through here, for both
+    // players and all input devices.
+    void handleButton(bool down, int button, bool isPlayer1) {
+        TMacRuntime& rt = tmacRuntime();
+        if (rt.session.isRecording() && !rt.session.isPlaybackActive()) {
+            const bool p2 = !isPlayer1;
+            if (isPlayer1 || m_gameState.m_isDualMode) {
+                rt.session.recordButton(tmacCurrentFrame(), p2,
+                                        static_cast<tmac::Button>(button), down);
+            }
+        }
+        GJBaseGameLayer::handleButton(down, button, isPlayer1);
     }
 
-    bool releaseButton(PlayerButton button) {
-        noteTransition(this, button, false);
-        return PlayerObject::releaseButton(button);
+    // One call per physics step. Deliver the macro events that are due before
+    // the step consumes its input queue, so they are felt on this exact step.
+    void processQueuedButtons(float dt, bool clearInputQueue) {
+        TMacRuntime& rt = tmacRuntime();
+        dispatchToGame(rt.session.tick(tmacCurrentFrame()));
+        GJBaseGameLayer::processQueuedButtons(dt, clearInputQueue);
     }
 };
