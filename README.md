@@ -10,7 +10,7 @@ Press **TAB** in a level to open or close the TMac window.
 |---|---|
 | Macro engine: recorder, playback scheduler, session | Implemented. Unit tested. |
 | TAB toggle rules (`ToggleController`) | Implemented. Unit tested. |
-| TAB key binding and window in Geometry Dash | Written against the documented Geode keybind API. **Not compiled or run in the game.** |
+| TAB key binding and window in Geometry Dash | Uses the Geode v5 `Popup` API (non-templated, `Popup::init`, virtual `onClose()`). **Not yet compiled against the SDK and not run in the game.** |
 | Build configuration | Follows the official Geode example CMake. The mod target links with the plain `target_link_libraries` signature that `setup_geode_mod()` uses. CMake configuration is confirmed by your CI log, not by a local run. |
 | GitHub Actions build | Uses the official `geode-sdk/build-geode-mod` action. **Not yet run.** |
 | `.gdr2` read and write | Implemented and unit tested. Compatibility with real bot files is **not verified**. |
@@ -72,7 +72,8 @@ A replay with a non-empty input tag is refused.
 
 ## Known limitations
 
-- The first build of this version still needs compilation to confirm the Geode layer. The Geode calls were checked against the Geode documentation, not a compiled SDK.
+- The Geode layer has been checked against the Geode v5 documentation and a syntax-only stub build. It has not been compiled against the real SDK. Expect small fixes on the next CI run.
+- The panel's child positions are computed from the window centre. Their on-screen layout has not been checked visually.
 
 - Geometry Dash's physics uses its own frame deltas. Playback timing can drift until a fixed physics step is wired in.
 - Player 2 is not recorded or played back.

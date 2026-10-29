@@ -5,17 +5,23 @@
   },
   "id": "tmac.macro",
   "name": "TMac",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "developer": "ziyyhhk",
   "description": "Record, save, load and replay Geometry Dash macros in the .gdr2 format. Press TAB in a level to open the window.",
-  "tags": ["gameplay", "utility"],
+  "tags": [
+    "gameplay",
+    "utility"
+  ],
   "settings": {
     "toggle-key": {
       "type": "keybind",
       "name": "Toggle TMac window",
       "category": "universal",
       "default": [
-        { "key": "Tab", "modifiers": [] }
+        {
+          "key": "Tab",
+          "modifiers": []
+        }
       ]
     }
   }
