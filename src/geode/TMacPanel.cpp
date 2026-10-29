@@ -44,11 +44,11 @@ namespace {
 
 TMacPanel* g_panel = nullptr;
 
-// Compact on purpose: this is a tool window, not a screen. 300x290 leaves the
-// level visible behind it.
-constexpr float kPanelWidth = 300.f;
-constexpr float kPanelHeight = 290.f;
-constexpr float kBarWidth = 240.f;
+// Compact on purpose: this is a tool window, not a screen. 320x320 leaves the
+// level visible behind it while every row keeps a readable gap.
+constexpr float kPanelWidth = 320.f;
+constexpr float kPanelHeight = 320.f;
+constexpr float kBarWidth = 264.f;
 constexpr float kBarHeight = 6.f;
 constexpr float kSmall = .5f;
 
@@ -198,9 +198,6 @@ $on_mod(Loaded) {
                 // Keep the Tab default.
             }
 
-            geode::log::debug("[TMac] key={} action={} expected={}", static_cast<int>(data.key),
-                              static_cast<int>(data.action), static_cast<int>(expected));
-
             if (data.key == expected && data.modifiers == geode::KeyboardModifier::None) {
                 tmacOnToggleKey(down, repeat);
             }
@@ -213,42 +210,42 @@ bool TMacPanel::setupPanel() {
     setTitle("TMac");
 
     // Modes.
-    addButton("off", "Off", menu_selector(TMacPanel::onModeOff), -95.f, -44.f, kSmall);
-    addButton("rec", "Rec", menu_selector(TMacPanel::onModeRecord), 0.f, -44.f, kSmall);
-    addButton("play", "Play", menu_selector(TMacPanel::onModePlay), 95.f, -44.f, kSmall);
+    addButton("off", "Off", menu_selector(TMacPanel::onModeOff), -96.f, -54.f, kSmall);
+    addButton("rec", "Rec", menu_selector(TMacPanel::onModeRecord), 0.f, -54.f, kSmall);
+    addButton("play", "Play", menu_selector(TMacPanel::onModePlay), 96.f, -54.f, kSmall);
 
     // Macro name for saving.
-    m_name = geode::TextInput::create(210.f, "Macro name");
+    m_name = geode::TextInput::create(250.f, "Macro name");
     m_name->setMaxCharCount(32);
-    m_mainLayer->addChildAtPosition(m_name, geode::Anchor::Top, ccp(0.f, -84.f));
+    m_mainLayer->addChildAtPosition(m_name, geode::Anchor::Top, ccp(0.f, -100.f));
 
     // Saved macro picker: < name >
-    addButton("prev", "<", menu_selector(TMacPanel::onPrevMacro), -118.f, -122.f, kSmall);
-    addButton("next", ">", menu_selector(TMacPanel::onNextMacro), 118.f, -122.f, kSmall);
+    addButton("prev", "<", menu_selector(TMacPanel::onPrevMacro), -142.f, -142.f, kSmall);
+    addButton("next", ">", menu_selector(TMacPanel::onNextMacro), 142.f, -142.f, kSmall);
     m_pick = CCLabelBMFont::create("(no saved macros)", "chatFont.fnt");
     m_pick->setScale(.55f);
-    m_mainLayer->addChildAtPosition(m_pick, geode::Anchor::Top, ccp(0.f, -122.f));
+    m_mainLayer->addChildAtPosition(m_pick, geode::Anchor::Top, ccp(0.f, -142.f));
 
-    // File actions.
-    addButton("save", "Save", menu_selector(TMacPanel::onSave), -62.f, -160.f, kSmall);
-    addButton("load", "Load", menu_selector(TMacPanel::onLoad), 62.f, -160.f, kSmall);
-    addButton("new", "New", menu_selector(TMacPanel::onNew), -62.f, -192.f, kSmall);
-    addButton("delete", "Delete", menu_selector(TMacPanel::onDelete), 62.f, -192.f, kSmall);
-    addButton("restart", "Restart", menu_selector(TMacPanel::onRestart), 0.f, -218.f, kSmall);
+    // File actions, one row, so the window stays short.
+    addButton("save", "Save", menu_selector(TMacPanel::onSave), -111.f, -184.f, kSmall);
+    addButton("load", "Load", menu_selector(TMacPanel::onLoad), -37.f, -184.f, kSmall);
+    addButton("new", "New", menu_selector(TMacPanel::onNew), 37.f, -184.f, kSmall);
+    addButton("delete", "Del", menu_selector(TMacPanel::onDelete), 111.f, -184.f, kSmall);
+    addButton("restart", "Restart", menu_selector(TMacPanel::onRestart), 0.f, -222.f, kSmall);
 
     // Status.
     m_status = CCLabelBMFont::create("Idle", "chatFont.fnt");
     m_status->setScale(.6f);
-    m_mainLayer->addChildAtPosition(m_status, geode::Anchor::Top, ccp(0.f, -238.f));
+    m_mainLayer->addChildAtPosition(m_status, geode::Anchor::Top, ccp(0.f, -252.f));
 
     m_timer = CCLabelBMFont::create("", "chatFont.fnt");
     m_timer->setScale(.5f);
-    m_mainLayer->addChildAtPosition(m_timer, geode::Anchor::Top, ccp(0.f, -254.f));
+    m_mainLayer->addChildAtPosition(m_timer, geode::Anchor::Top, ccp(0.f, -272.f));
 
     auto* track = CCLayerColor::create(ccc4(0, 0, 0, 110), kBarWidth, kBarHeight);
     track->ignoreAnchorPointForPosition(false);
     track->setAnchorPoint(ccp(.5f, .5f));
-    m_mainLayer->addChildAtPosition(track, geode::Anchor::Bottom, ccp(0.f, 26.f));
+    m_mainLayer->addChildAtPosition(track, geode::Anchor::Bottom, ccp(0.f, 24.f));
 
     m_barFill = CCLayerColor::create(ccc4(95, 215, 130, 255), 0.f, kBarHeight);
     m_barFill->ignoreAnchorPointForPosition(false);
@@ -300,7 +297,7 @@ void TMacPanel::updatePickerLabel() {
         return;
     }
     m_pick->setString(m_entries[m_pickIndex].name.c_str());
-    m_pick->limitLabelWidth(150.f, .55f, .2f);
+    m_pick->limitLabelWidth(196.f, .55f, .2f);
 }
 
 void TMacPanel::refresh() {
