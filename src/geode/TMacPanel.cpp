@@ -1,18 +1,27 @@
 // =============================================================================
 // TMac window and pause-menu entry point.
 //
-// Geode SDK v5.11.1 API used here (from the Geode v5 documentation):
-//   * geode::Popup is NOT templated. Subclass it as `public geode::Popup`.
-//   * Initialise with Popup::init(width, height) inside a derived method that
-//     returns bool, then autorelease the object in create().
-//   * Popup::setTitle, Popup::show (FLAlertLayer), Popup::onClose (virtual, no args).
-//   * There is no setup() hook and no m_mainLayer in v5. Content is added as
-//     children of the popup itself.
-//   * Include paths: Geode/ui/Popup.hpp, Geode/binding/CCMenuItemSpriteExtra.hpp,
-//     Geode/binding/ButtonSprite.hpp, Geode/loader/SettingV3.hpp.
+// Geode SDK v5.11.1 API, read from the SDK sources at tag v5.11.1
+// (loader/include/Geode/ui/Popup.hpp and loader/src/ui/nodes/Popup.cpp):
+//   * geode::Popup is a plain, non-templated FLAlertLayer subclass.
+//   * Popup::init(width, height) is protected, so it is called from a derived
+//     method and the object is autoreleased in create().
+//   * The close handler is `virtual void onClose(CCObject*)` - it takes the
+//     sender and is protected. The base version sends CloseEvent, disables
+//     touch and keypad input, then removes the popup from its parent. The
+//     built-in X button and keyBackClicked() (ESC) both go through it, so
+//     overriding it is the only way to catch every close.
+//   * Popup::init *does* create m_mainLayer (content size = popup size,
+//     centred on screen) and m_buttonMenu (z-order 100, kept the same size as
+//     m_mainLayer by CopySizeLayout). Content belongs in those nodes, with
+//     coordinates relative to the window box, not in screen coordinates on the
+//     popup itself.
+//   * Buttons go in m_buttonMenu so they inherit the popup's forced touch
+//     priority; a hand-made CCMenu added to the popup is not guaranteed to
+//     receive touches while the popup is swallowing them.
 //
-// Still needs a compiled check: child positions are computed from the window
-// centre, and the pause-menu button placement is unverified visually.
+// Still unverified: exact pixel placement inside the window and the pause-menu
+// button position have not been checked in-game.
 // =============================================================================
 #include <Geode/Geode.hpp>
 #include <Geode/binding/ButtonSprite.hpp>
@@ -39,6 +48,9 @@ namespace {
 // game removed without telling us can never be a dangling pointer.
 TMacPanel* g_panel = nullptr;
 
+constexpr float kPanelWidth = 380.f;
+constexpr float kPanelHeight = 340.f;
+
 }  // namespace
 
 class TMacPanel : public geode::Popup {
@@ -46,8 +58,8 @@ public:
     static TMacPanel* create();
     static void open();
 
-    // Popup's close handler, virtual in v5 and takes no arguments.
-    void onClose() override;
+    // Closes the window from outside the class (toggle keybind, level exit).
+    void closeNow();
 
     void onRecord(CCObject*);
     void onStopRecording(CCObject*);
@@ -60,11 +72,15 @@ public:
     void onLoad(CCObject*);
 
 protected:
+    // Popup's close handler. `sender` is the X button, or null when the close
+    // came from ESC or from closeNow().
+    void onClose(CCObject* sender) override;
+
     bool setupPanel();
     void tick(float dt);
     void refresh();
-    void addButton(CCMenu* menu, const std::string& id, const char* label, SEL_MenuHandler handler,
-                   float x, float y);
+    void addButton(const std::string& id, const char* label, SEL_MenuHandler handler, float x,
+                   float y);
     void setButtonEnabled(const std::string& id, bool enabled);
 
     std::map<std::string, CCMenuItemSpriteExtra*> m_buttons;
@@ -80,7 +96,8 @@ bool isPanelShown() {
     return g_panel != nullptr && g_panel->getParent() != nullptr;
 }
 
-// Drops our reference. The autorelease pool and the scene still hold theirs.
+// Drops our reference. May be the last one, so nothing must touch the window
+// after this returns.
 void releaseOpenPanel() {
     TMacPanel* panel = g_panel;
     g_panel = nullptr;
@@ -111,11 +128,18 @@ void TMacPanel::open() {
     panel->show();
 }
 
-void TMacPanel::onClose() {
-    geode::Popup::onClose();  // base removes the popup from the scene
+void TMacPanel::closeNow() {
+    this->onClose(nullptr);
+}
+
+void TMacPanel::onClose(CCObject* sender) {
     unschedule(schedule_selector(TMacPanel::tick));
-    if (g_panel == this) releaseOpenPanel();
     tmacRuntime().toggle.setOpen(false);
+    // Base removes the popup from the scene; our own retain keeps `this` alive
+    // across the call.
+    geode::Popup::onClose(sender);
+    // Last statement on purpose: this can free the window.
+    if (g_panel == this) releaseOpenPanel();
 }
 
 void tmacOnToggleKey(bool down, bool repeat) {
@@ -131,7 +155,7 @@ void tmacOnToggleKey(bool down, bool repeat) {
             rt.toggle.setOpen(isPanelShown());
             break;
         case tmac::ToggleController::Action::Close:
-            if (g_panel) g_panel->onClose();
+            if (g_panel) g_panel->closeNow();
             rt.toggle.setOpen(false);
             break;
         case tmac::ToggleController::Action::None:
@@ -140,7 +164,7 @@ void tmacOnToggleKey(bool down, bool repeat) {
 }
 
 void tmacCloseOpenPanel() {
-    if (g_panel) g_panel->onClose();
+    if (g_panel) g_panel->closeNow();
     tmacRuntime().toggle.setOpen(false);
 }
 
@@ -157,52 +181,45 @@ $on_mod(Loaded) {
 }
 
 bool TMacPanel::setupPanel() {
-    if (!geode::Popup::init(380.f, 340.f)) return false;
+    if (!geode::Popup::init(kPanelWidth, kPanelHeight)) return false;
     setTitle("TMac");
 
-    // Children of the popup are placed in screen coordinates, relative to the centre.
-    const CCSize win = CCDirector::sharedDirector()->getWinSize();
-    const float cx = win.width / 2.f;
-    const float cy = win.height / 2.f;
-
+    // Offsets below are relative to the window box (m_mainLayer), so the
+    // layout no longer depends on the screen resolution.
     m_status = CCLabelBMFont::create("Idle", "bigFont.fnt");
-    m_status->setPosition(ccp(cx, cy + 100.f));
-    addChild(m_status);
+    m_status->setScale(.6f);
+    m_mainLayer->addChildAtPosition(m_status, geode::Anchor::Top, ccp(0.f, -52.f));
 
     m_timer = CCLabelBMFont::create("", "chatFont.fnt");
-    m_timer->setPosition(ccp(cx, cy + 72.f));
-    addChild(m_timer);
+    m_timer->setScale(.7f);
+    m_mainLayer->addChildAtPosition(m_timer, geode::Anchor::Top, ccp(0.f, -78.f));
 
     m_info = CCLabelBMFont::create("", "chatFont.fnt");
-    m_info->setPosition(ccp(cx, cy - 150.f));
-    addChild(m_info);
+    m_info->setScale(.6f);
+    m_mainLayer->addChildAtPosition(m_info, geode::Anchor::Bottom, ccp(0.f, 20.f));
 
-    CCMenu* menu = CCMenu::create();
-    menu->setPosition(ccp(0.f, 0.f));
-    addChild(menu);
-
-    const float colX[2] = {cx - 85.f, cx + 85.f};
-    const float rowY[4] = {cy + 30.f, cy - 10.f, cy - 50.f, cy - 90.f};
-    addButton(menu, "record", "Record", menu_selector(TMacPanel::onRecord), colX[0], rowY[0]);
-    addButton(menu, "stopRecord", "Stop Rec", menu_selector(TMacPanel::onStopRecording), colX[1], rowY[0]);
-    addButton(menu, "play", "Play", menu_selector(TMacPanel::onPlay), colX[0], rowY[1]);
-    addButton(menu, "restart", "Restart", menu_selector(TMacPanel::onRestart), colX[1], rowY[1]);
-    addButton(menu, "pause", "Pause", menu_selector(TMacPanel::onPause), colX[0], rowY[2]);
-    addButton(menu, "resume", "Resume", menu_selector(TMacPanel::onResume), colX[1], rowY[2]);
-    addButton(menu, "stop", "Stop", menu_selector(TMacPanel::onStop), colX[0], rowY[3]);
-    addButton(menu, "save", "Save", menu_selector(TMacPanel::onSave), colX[1], rowY[3]);
-    addButton(menu, "load", "Load", menu_selector(TMacPanel::onLoad), cx, cy - 130.f);
+    const float colX[2] = {-85.f, 85.f};
+    const float rowY[4] = {45.f, 5.f, -35.f, -75.f};
+    addButton("record", "Record", menu_selector(TMacPanel::onRecord), colX[0], rowY[0]);
+    addButton("stopRecord", "Stop Rec", menu_selector(TMacPanel::onStopRecording), colX[1], rowY[0]);
+    addButton("play", "Play", menu_selector(TMacPanel::onPlay), colX[0], rowY[1]);
+    addButton("restart", "Restart", menu_selector(TMacPanel::onRestart), colX[1], rowY[1]);
+    addButton("pause", "Pause", menu_selector(TMacPanel::onPause), colX[0], rowY[2]);
+    addButton("resume", "Resume", menu_selector(TMacPanel::onResume), colX[1], rowY[2]);
+    addButton("stop", "Stop", menu_selector(TMacPanel::onStop), colX[0], rowY[3]);
+    addButton("save", "Save", menu_selector(TMacPanel::onSave), colX[1], rowY[3]);
+    addButton("load", "Load", menu_selector(TMacPanel::onLoad), 0.f, -115.f);
 
     schedule(schedule_selector(TMacPanel::tick), 0.1f);
     refresh();
     return true;
 }
 
-void TMacPanel::addButton(CCMenu* menu, const std::string& id, const char* label, SEL_MenuHandler handler,
+void TMacPanel::addButton(const std::string& id, const char* label, SEL_MenuHandler handler,
                           float x, float y) {
     auto* button = CCMenuItemSpriteExtra::create(ButtonSprite::create(label), this, handler);
-    button->setPosition(ccp(x, y));
-    menu->addChild(button);
+    // m_buttonMenu already carries the popup's touch priority.
+    m_buttonMenu->addChildAtPosition(button, geode::Anchor::Center, ccp(x, y));
     m_buttons[id] = button;
 }
 
