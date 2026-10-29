@@ -177,6 +177,14 @@ std::vector<InputEvent> Session::onLevelEvent(LevelEvent event, uint64_t gameFra
         case LevelEvent::Died:
             recorder_.recordDeath(gameFrame);  // deaths are part of the recording
             break;
+        case LevelEvent::Exited:
+            if (isRecording()) {
+                // Keep what was captured. Leaving it recording would strand the
+                // recorder once the game's frame counter resets.
+                stopRecording(gameFrame);
+                message_ = "Recording stopped because the level was closed. The recording was kept.";
+            }
+            break;
         default:
             break;
     }

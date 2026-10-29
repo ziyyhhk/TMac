@@ -12,6 +12,7 @@
 #include <Geode/modify/PlayLayer.hpp>
 #include <Geode/modify/PlayerObject.hpp>
 
+#include "TMacPanel.hpp"
 #include "TMacRuntime.hpp"
 
 using namespace geode::prelude;
@@ -60,6 +61,7 @@ class $modify(TMacPlayLayer, PlayLayer) {
 
     void onQuit() {
         notifyLevel(tmac::LevelEvent::Exited);
+        tmacCloseOpenPanel();
         tmacRuntime().clock.reset();
         PlayLayer::onQuit();
     }

@@ -10,19 +10,27 @@
 // =============================================================================
 #include <Geode/Geode.hpp>
 #include <Geode/modify/PauseLayer.hpp>
+#include <Geode/modify/PlayLayer.hpp>
 
 #include <map>
 #include <string>
 
+#include "TMacPanel.hpp"
 #include "TMacRuntime.hpp"
 #include "tmac/PanelView.hpp"
 
 using namespace geode::prelude;
 
+class TMacPanel;
+namespace {
+TMacPanel* g_panel = nullptr;  // the one open window, if any
+}  // namespace
+
 class TMacPanel : public geode::Popup<> {
 public:
     static TMacPanel* create();
     static void open();
+    void onClose(CCObject* sender);  // also called by the close button, so state stays in sync
 
     void onRecord(CCObject*);
     void onStopRecording(CCObject*);
@@ -60,7 +68,54 @@ TMacPanel* TMacPanel::create() {
 }
 
 void TMacPanel::open() {
-    if (TMacPanel* panel = TMacPanel::create()) panel->show();
+    if (g_panel) return;  // one window only
+    if (TMacPanel* panel = TMacPanel::create()) {
+        panel->show();
+        g_panel = panel;
+    }
+}
+
+void TMacPanel::onClose(CCObject* sender) {
+    if (g_panel == this) g_panel = nullptr;
+    tmacRuntime().toggle.setOpen(false);
+    geode::Popup<>::onClose(sender);  // UNVERIFIED: Popup::onClose is assumed to be the close handler
+}
+
+void tmacOnToggleKey(bool down, bool repeat) {
+    TMacRuntime& rt = tmacRuntime();
+    switch (rt.toggle.onKey(down, repeat)) {
+        case tmac::ToggleController::Action::Open:
+            // Only inside a level, because recording and playback need one.
+            if (!PlayLayer::get()) {
+                rt.toggle.setOpen(false);
+                return;
+            }
+            TMacPanel::open();
+            rt.toggle.setOpen(g_panel != nullptr);
+            break;
+        case tmac::ToggleController::Action::Close:
+            if (g_panel) g_panel->onClose(nullptr);
+            rt.toggle.setOpen(false);
+            break;
+        case tmac::ToggleController::Action::None:
+            break;
+    }
+}
+
+void tmacCloseOpenPanel() {
+    if (g_panel) g_panel->onClose(nullptr);
+}
+
+// TAB is registered as a keybind setting in mod.json ("toggle-key").
+// UNVERIFIED: the keybind default JSON shape; the Geode VS Code extension validates mod.json.
+$on_mod(Loaded) {
+    [[maybe_unused]] static auto* toggleListener = listenForKeybindSettingPresses(
+        "toggle-key",
+        [](auto const&, bool down, bool repeat, double) -> bool {
+            tmacOnToggleKey(down, repeat);
+            return true;
+        },
+        geode::Mod::get());
 }
 
 bool TMacPanel::setup() {

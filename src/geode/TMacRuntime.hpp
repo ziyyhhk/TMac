@@ -7,11 +7,13 @@
 #include "tmac/FixedStepClock.hpp"
 #include "tmac/MacroStore.hpp"
 #include "tmac/Session.hpp"
+#include "tmac/ToggleController.hpp"
 
 // Process-wide TMac state. Touched only on the game's main thread.
 struct TMacRuntime {
     tmac::Session session;
     tmac::FixedStepClock clock{240.0, 0.25};
+    tmac::ToggleController toggle;            // TAB window state
     std::unique_ptr<tmac::MacroStore> store;  // created on first use
     bool dispatching = false;                 // true while TMac itself presses or releases buttons
     size_t nextLoadIndex = 0;

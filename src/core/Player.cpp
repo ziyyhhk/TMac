@@ -74,7 +74,11 @@ std::vector<InputEvent> Player::tick(uint64_t gameFrame) {
         lastGameFrame_ = gameFrame;
         haveLast_ = true;
     }
-    if (gameFrame > lastGameFrame_) {
+    if (gameFrame < lastGameFrame_) {
+        // The game's frame counter went backwards, for example after a clock reset.
+        // Rebase now. Otherwise macro time would stall until the old counter was passed.
+        lastGameFrame_ = gameFrame;
+    } else if (gameFrame > lastGameFrame_) {
         elapsed_ += gameFrame - lastGameFrame_;
         lastGameFrame_ = gameFrame;
     }

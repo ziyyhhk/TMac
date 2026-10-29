@@ -13,6 +13,7 @@
 #include "tmac/MacroStore.hpp"
 #include "tmac/PanelView.hpp"
 #include "tmac/Session.hpp"
+#include "tmac/ToggleController.hpp"
 
 namespace tmac_phase2 {
 namespace {
@@ -345,6 +346,75 @@ void testStoreRenameRemove() {
     fs::remove_all(dir);
 }
 
+
+// ----- Phase 3: toggle rules and regressions
+
+void testToggleController() {
+    ToggleController t;
+    CHECK(!t.isOpen());
+    CHECK(t.onKey(false, false) == ToggleController::Action::None);  // release does nothing
+    CHECK(t.onKey(true, true) == ToggleController::Action::None);    // key-repeat does nothing
+    CHECK(!t.isOpen());
+    CHECK(t.onKey(true, false) == ToggleController::Action::Open);
+    CHECK(t.isOpen());
+    CHECK(t.onKey(true, true) == ToggleController::Action::None);   // holding does not reopen
+    CHECK(t.onKey(false, false) == ToggleController::Action::None);
+    CHECK(t.onKey(true, false) == ToggleController::Action::Close);
+    CHECK(!t.isOpen());
+    // The window was closed by its own button, so the UI reports it.
+    CHECK(t.onKey(true, false) == ToggleController::Action::Open);
+    t.setOpen(false);
+    CHECK(!t.isOpen());
+    CHECK(t.onKey(true, false) == ToggleController::Action::Open);
+}
+
+void testPlayerRebasesOnBackwardsClock() {
+    // Regression: a backwards game-frame counter (clock reset) used to stall macro time.
+    Macro m;
+    m.append(InputEvent{0, Button::Jump, false, true});
+    m.append(InputEvent{100, Button::Jump, false, false});
+    m.durationFrames = 200;
+    Player p;
+    std::vector<InputEvent> releases;
+    CHECK(p.load(m, releases) == MacroError::Ok);
+    CHECK(p.play());
+    p.tick(1000);
+    p.tick(1010);
+    CHECK(p.elapsedFrames() == 10);
+    p.tick(5);                        // counter went backwards
+    CHECK(p.elapsedFrames() == 10);
+    p.tick(15);                       // must advance from the rebased counter
+    CHECK(p.elapsedFrames() == 20);
+}
+
+void testExitWhileRecordingKeepsRecording() {
+    // Regression: closing the level mid-recording used to leave the recorder stuck.
+    Session s;
+    CHECK(s.startRecording(0, meta()));
+    CHECK(s.recordButton(0, false, Button::Jump, true));
+    CHECK(s.onLevelEvent(LevelEvent::Exited, 30).empty());
+    CHECK(!s.isRecording());
+    CHECK(s.recorderState() == Recorder::State::Stopped);
+    CHECK(s.hasMacro());
+    CHECK(s.currentMacro().inputs.size() == 2);        // press + release at the exit frame
+    CHECK(s.currentMacro().durationFrames == 30);
+    CHECK(s.message().find("level was closed") != std::string::npos);
+    CHECK(s.startRecording(40, meta()));               // a new recording can start afterwards
+}
+
+void testNewRecordingHasNoStaleEvents() {
+    Session s;
+    CHECK(s.startRecording(0, meta()));
+    CHECK(s.recordButton(0, false, Button::Jump, true));
+    CHECK(s.recordButton(5, false, Button::Jump, false));
+    CHECK(s.stopRecording(10));
+    CHECK(s.startRecording(100, meta()));
+    CHECK(s.recordButton(100, false, Button::Jump, true));
+    CHECK(s.stopRecording(110));
+    CHECK(s.currentMacro().inputs.size() == 2);        // only the second recording
+    CHECK(s.currentMacro().inputs[0].frame == 0);
+}
+
 }  // namespace
 
 int run() {
@@ -364,6 +434,10 @@ int run() {
     testStoreRejectsTraversalAndBadFiles();
     testStoreImportRules();
     testStoreRenameRemove();
+    testToggleController();
+    testPlayerRebasesOnBackwardsClock();
+    testExitWhileRecordingKeepsRecording();
+    testNewRecordingHasNoStaleEvents();
     std::printf("phase2: %d checks, %d failures\n", g_checks, g_failures);
     return g_failures;
 }

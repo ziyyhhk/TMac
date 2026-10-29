@@ -9,6 +9,8 @@ permissions:
   contents: read
 
 jobs:
+  # Runs on every push: builds and tests the framework-independent core.
+  # No Geode SDK is needed here.
   core-tests:
     name: Core unit tests (Linux)
     runs-on: ubuntu-latest
@@ -23,35 +25,44 @@ jobs:
         run: cmake --build build --config Release
 
       - name: Run tests
-        run: ctest --test-dir build --output-on-failure
+        run: ctest --test-dir build --output-on-failure -C Release
 
+  # Builds the Geode mod with the official action. The action installs the
+  # Geode SDK and sets GEODE_SDK for CMake, so no SDK clone is needed.
+  # UNVERIFIED in this environment: the sdk input value format. If the action
+  # rejects "v5.11.1", check its accepted format in the job log.
   geode-build:
-    name: Geode mod build (Windows, GD 2.2081 / Geode 5.11.1)
+    name: Geode mod build (Windows, GD 2.2081, Geode 5.11.1)
     runs-on: windows-latest
     needs: core-tests
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      # UNVERIFIED: confirm this action exists and its inputs against the Geode
-      # documentation before relying on it. The job must fail clearly if the
-      # build does not produce a package, which the steps below enforce.
       - name: Build Geode mod
+        id: build
         uses: geode-sdk/build-geode-mod@main
+        with:
+          sdk: 'v5.11.1'
 
-      - name: Verify compiled output exists
+      - name: Verify the .geode package exists
         shell: pwsh
         run: |
-          $packages = Get-ChildItem -Recurse -Filter *.geode -Path . -ErrorAction SilentlyContinue
-          if (-not $packages) {
-            Write-Error "No .geode package was produced. The build failed or the output path changed."
+          $out = "${{ steps.build.outputs.build-output }}"
+          if (-not (Test-Path $out)) {
+            Write-Error "Build output path '$out' does not exist. The build did not produce a package."
             exit 1
           }
-          $packages | ForEach-Object { Write-Output $_.FullName }
+          $packages = Get-ChildItem -Path $out -Filter *.geode -Recurse -ErrorAction SilentlyContinue
+          if (-not $packages) {
+            Write-Error "No .geode package was found under '$out'."
+            exit 1
+          }
+          $packages | ForEach-Object { Write-Output "Found package: $($_.FullName)" }
 
       - name: Upload compiled mod
         uses: actions/upload-artifact@v4
         with:
           name: TMac-GeometryDash-2.2081-Geode-5.11.1
-          path: "**/*.geode"
+          path: ${{ steps.build.outputs.build-output }}
           if-no-files-found: error
