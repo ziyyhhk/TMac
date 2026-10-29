@@ -16,13 +16,9 @@
     "toggle-key": {
       "type": "keybind",
       "name": "Toggle TMac window",
+      "description": "Opens and closes the TMac window while playing a level.",
       "category": "universal",
-      "default": [
-        {
-          "key": "Tab",
-          "modifiers": []
-        }
-      ]
+      "default": "Tab"
     }
   }
 }
